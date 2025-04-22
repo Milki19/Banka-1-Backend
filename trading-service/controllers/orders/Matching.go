@@ -141,7 +141,7 @@ func MatchOrder(order types.Order) {
 			//}
 
 			// Ažuriraj order u bazi (unutar transakcije)
-			if err := tx.Model(&types.Order{}).Where("id = ?", order.ID).Update("remaining_parts", *orderCopy.RemainingParts).Error; err != nil {
+			if err := tx.Model(&types.Order{}).Where("id = ?", order.ID).Update("remaining_parts", *order.RemainingParts).Error; err != nil {
 				fmt.Printf("Greska pri upisu remaining_parts: %v\n", err)
 				tx.Rollback()
 				break
