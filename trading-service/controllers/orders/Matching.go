@@ -106,11 +106,10 @@ func MatchOrder(order types.Order) {
 
 			price := getOrderPrice(order)
 
-			orderCopy := order
-
-			matchQuantity := executePartial(&orderCopy, price, tx)
+			// izvršavanje koliko može
+			matchQuantity := executePartial(&order, price, tx)
 			if order.RemainingParts != nil {
-				fmt.Printf("Nakon executePartial: remaining=%d\n", *orderCopy.RemainingParts)
+				fmt.Printf("Nakon executePartial: remaining=%d\n", *order.RemainingParts)
 			} else {
 				fmt.Printf("order.RemainingParts je NIL nakon executePartial\n")
 			}
