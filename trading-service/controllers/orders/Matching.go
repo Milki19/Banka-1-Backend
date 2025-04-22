@@ -289,6 +289,9 @@ func executePartial(order1 *types.Order, price float64, tx *gorm.DB) int {
 		return 0
 	}
 	if order1.AON {
+		order := *order1
+		order.RemainingParts = ptr(ptrSafe(order.RemainingParts))
+
 		totalAvailable := 0
 		selectedMatches := []types.Order{}
 
@@ -301,19 +304,19 @@ func executePartial(order1 *types.Order, price float64, tx *gorm.DB) int {
 			}
 			totalAvailable += *match.RemainingParts
 			selectedMatches = append(selectedMatches, match)
-			if totalAvailable >= *order1.RemainingParts {
+			if totalAvailable >= *order.RemainingParts {
 				break
 			}
 		}
 
-		if totalAvailable < *order1.RemainingParts {
-			fmt.Println("Nema dovoljno available matches za AON order", order1.ID)
+		if totalAvailable < *order.RemainingParts {
+			fmt.Println("Nema dovoljno available matches za AON order", order.ID)
 			return 0
 		}
 
-		fmt.Printf("Pronađeno dovoljno match-eva za AON order %d\n", order1.ID)
+		fmt.Printf("Pronađeno dovoljno match-eva za AON order %d\n", order.ID)
 
-		matchQty := *order1.RemainingParts
+		matchQty := *order.RemainingParts
 		remainingToFill := matchQty
 
 		for _, match := range selectedMatches {
@@ -321,10 +324,10 @@ func executePartial(order1 *types.Order, price float64, tx *gorm.DB) int {
 
 			err := tx.Debug().Transaction(func(tx *gorm.DB) error {
 				txn := types.Transaction{
-					OrderID:      order1.ID,
-					BuyerID:      getBuyerID(*order1, match),
-					SellerID:     getSellerID(*order1, match),
-					SecurityID:   order1.SecurityID,
+					OrderID:      order.ID,
+					BuyerID:      getBuyerID(order, match),
+					SellerID:     getSellerID(order, match),
+					SecurityID:   order.SecurityID,
 					Quantity:     currentMatchQty,
 					PricePerUnit: price,
 					TotalPrice:   price * float64(currentMatchQty),
@@ -349,37 +352,37 @@ func executePartial(order1 *types.Order, price float64, tx *gorm.DB) int {
 					return err
 				}
 
-				if err := updatePortfolio(getBuyerID(*order1, match), order1.SecurityID, currentMatchQty, price, tx); err != nil {
+				if err := updatePortfolio(getBuyerID(order, match), order.SecurityID, currentMatchQty, price, tx); err != nil {
 					return err
 				}
 
-				if err := updatePortfolio(getSellerID(*order1, match), order1.SecurityID, -currentMatchQty, price, tx); err != nil {
+				if err := updatePortfolio(getSellerID(order, match), order.SecurityID, -currentMatchQty, price, tx); err != nil {
 					return err
 				}
 
-				if isAgent(getBuyerID(*order1, match)) {
+				if isAgent(getBuyerID(order, match)) {
 					var actuary types.Actuary
-					if err := tx.Where("user_id = ?", order1.UserID).First(&actuary).Error; err == nil {
+					if err := tx.Where("user_id = ?", order.UserID).First(&actuary).Error; err == nil {
 						initialMargin := price * float64(matchQty)
 						actuary.UsedLimit += initialMargin
 						if err := tx.Save(&actuary).Error; err != nil {
 							fmt.Printf("Greska pri save UsedLimit za order agenta: %v\n", err)
 						} else {
-							fmt.Printf("Agent order.UserID=%d - povećan UsedLimit za %.2f\n", order1.UserID, initialMargin)
+							fmt.Printf("Agent order.UserID=%d - povećan UsedLimit za %.2f\n", order.UserID, initialMargin)
 						}
 					}
 				}
 
-				uid := fmt.Sprintf("ORDER-match-%d-%d", order1.ID, time.Now().UnixNano())
+				uid := fmt.Sprintf("ORDER-match-%d-%d", order.ID, time.Now().UnixNano())
 				total := price * float64(currentMatchQty)
-				fee := CalculateFee(*order1, total)
+				fee := CalculateFee(order, total)
 				initiationDto := dto.OrderTransactionInitiationDTO{
 					Uid:             uid,
-					SellerAccountId: getSellerAccountID(*order1, match),
-					BuyerAccountId:  getBuyerAccountID(*order1, match),
+					SellerAccountId: getSellerAccountID(order, match),
+					BuyerAccountId:  getBuyerAccountID(order, match),
 					Amount:          total,
 					Fee:             fee,
-					Direction:       order1.Direction,
+					Direction:       order.Direction,
 				}
 
 				fmt.Println("Šaljem OrderTransactionInitiationDTO za svakog seller-a...")
@@ -406,14 +409,14 @@ func executePartial(order1 *types.Order, price float64, tx *gorm.DB) int {
 			}
 		}
 
-		if order1.RemainingParts == nil {
-			tmp := order1.Quantity
-			order1.RemainingParts = &tmp
+		if order.RemainingParts == nil {
+			tmp := order.Quantity
+			order.RemainingParts = &tmp
 		}
-		*order1.RemainingParts = 0
+		*order.RemainingParts = 0
 
 		if err := tx.Model(&types.Order{}).
-			Where("id = ?", order1.ID).
+			Where("id = ?", order.ID).
 			Updates(map[string]interface{}{
 				"remaining_parts": 0,
 				"is_done":         true,
@@ -422,6 +425,7 @@ func executePartial(order1 *types.Order, price float64, tx *gorm.DB) int {
 			fmt.Printf("Greska pri upisu remaining_parts za AON order: %v\n", err)
 		}
 
+		*order1 = order
 		return matchQty
 	} else {
 		for _, match := range matches {
